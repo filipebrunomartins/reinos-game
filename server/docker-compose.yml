@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: game
+      POSTGRES_PASSWORD: game
+      POSTGRES_DB: reinos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    ports: ["5432:5432"]
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+  server:
+    build: .
+    environment:
+      DATABASE_URL: postgres://game:game@db:5432/reinos
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-troque-em-producao}
+      PORT: 8080
+    depends_on: [db, redis]
+    ports: ["8080:8080"]
+volumes:
+  pgdata:
