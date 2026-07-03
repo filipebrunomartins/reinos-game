@@ -16,7 +16,7 @@ client/     Projeto Unity 2022 LTS (Etapa 3+)
 ## Roadmap de etapas
 
 - [x] **Etapa 1** — GDD + esquema do banco + contrato OpenAPI
-- [ ] **Etapa 2** — Backend: auth, economia, AFK, gacha, anti-cheat básico
+- [x] **Etapa 2** — Backend: auth, economia, AFK, gacha, anti-cheat básico
 - [ ] **Etapa 3** — Unity: estrutura, telas, sincronização de dados
 - [ ] **Etapa 4** — Combate automático 5v5 determinístico
 - [ ] **Etapa 5** — Arena assíncrona, rankings, torre, masmorras
