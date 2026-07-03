@@ -1,0 +1,40 @@
+# ---------- Node / servidor ----------
+server/node_modules/
+server/dist/
+server/.env
+server/.env.*
+!server/.env.example
+npm-debug.log*
+*.tsbuildinfo
+
+# segredos (chaves de loja, service accounts)
+*.pem
+*.p8
+*.keystore
+google-service-account*.json
+
+# ---------- Unity / cliente ----------
+client/[Ll]ibrary/
+client/[Tt]emp/
+client/[Oo]bj/
+client/[Bb]uild/
+client/[Bb]uilds/
+client/[Ll]ogs/
+client/[Uu]ser[Ss]ettings/
+client/[Mm]emoryCaptures/
+client/.vs/
+client/.gradle/
+client/*.csproj
+client/*.sln
+client/*.user
+client/*.apk
+client/*.aab
+client/*.unitypackage
+client/crashlytics-build.properties
+
+# ---------- Geral ----------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

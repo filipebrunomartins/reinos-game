@@ -1,0 +1,953 @@
+openapi: 3.1.0
+info:
+  title: Reinos de Ferro & Magia — Game API
+  version: 1.0.0
+  description: 'API server-authoritative do idle RPG. Todas as recompensas, sorteios de gacha e resultados de batalha são
+    calculados no servidor. Endpoints de recompensa exigem o header Idempotency-Key. Autenticação: Bearer JWT (access 15 min).
+
+    '
+servers:
+- url: https://api.SEUJOGO.com/v1
+security:
+- bearerAuth: []
+tags:
+- name: auth
+- name: player
+- name: heroes
+- name: afk
+- name: gacha
+- name: battle
+- name: arena
+- name: quests
+- name: shop
+- name: config
+paths:
+  /auth/anonymous:
+    post:
+      tags:
+      - auth
+      security: []
+      summary: Login/registro anônimo por device_id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - device_id
+              properties:
+                device_id:
+                  type: string
+                  minLength: 16
+                platform:
+                  type: string
+                  enum:
+                  - android
+                  - ios
+                app_version:
+                  type: string
+      responses:
+        '200':
+          description: Tokens + flag de conta nova
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+  /auth/link:
+    post:
+      tags:
+      - auth
+      summary: Vincular Google/Apple à conta anônima atual
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - provider
+              - id_token
+              properties:
+                provider:
+                  type: string
+                  enum:
+                  - google
+                  - apple
+                id_token:
+                  type: string
+      responses:
+        '200':
+          description: Vinculado
+        '409':
+          description: Provedor já vinculado a outra conta
+  /auth/refresh:
+    post:
+      tags:
+      - auth
+      security: []
+      summary: Renovar access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - refresh_token
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+          description: OK
+        '401':
+          description: Refresh inválido/expirado
+  /config:
+    get:
+      tags:
+      - config
+      security: []
+      summary: Dados estáticos versionados (heróis, estágios, itens, produtos, taxas de gacha)
+      parameters:
+      - name: If-None-Match
+        in: header
+        schema:
+          type: string
+        description: checksum da versão cacheada pelo cliente
+      responses:
+        '200':
+          description: Config completa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: integer
+                  checksum:
+                    type: string
+                  heroes:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HeroDef'
+                  stages:
+                    type: array
+                    items:
+                      type: object
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  products:
+                    type: array
+                    items:
+                      type: object
+                  gacha_rates:
+                    type: object
+                    description: Taxas publicadas (exibidas no app)
+        '304':
+          description: Cliente já tem a versão atual
+  /player:
+    get:
+      tags:
+      - player
+      summary: Estado completo do jogador (perfil, recursos, heróis, itens, formações, progresso)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerState'
+          description: OK
+  /player/nickname:
+    put:
+      tags:
+      - player
+      summary: Alterar apelido
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - nickname
+              properties:
+                nickname:
+                  type: string
+                  minLength: 3
+                  maxLength: 16
+      responses:
+        '200':
+          description: OK
+        '422':
+          description: Apelido inválido/proibido
+  /player/formation/{kind}:
+    put:
+      tags:
+      - player
+      summary: Salvar formação (campaign | arena_defense | tower)
+      parameters:
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - campaign
+          - arena_defense
+          - tower
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - slots
+              properties:
+                slots:
+                  type: array
+                  maxItems: 5
+                  items:
+                    type: object
+                    required:
+                    - position
+                    - player_hero_id
+                    properties:
+                      position:
+                        type: integer
+                        minimum: 0
+                        maximum: 4
+                      player_hero_id:
+                        type: string
+                        format: uuid
+      responses:
+        '200':
+          description: Salva
+        '422':
+          description: Herói inexistente ou duplicado na formação
+  /heroes/{playerHeroId}/level-up:
+    post:
+      tags:
+      - heroes
+      summary: Subir níveis (servidor valida ouro/poeira e caps)
+      parameters:
+      - name: playerHeroId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                levels:
+                  type: integer
+                  minimum: 1
+                  default: 1
+                  description: ou use to_max=true
+                to_max:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Novo estado do herói + recursos restantes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeroMutationResponse'
+        '402':
+          description: Recursos insuficientes
+        '409':
+          description: Cap de nível atingido (estrelas/nível de conta)
+  /heroes/{playerHeroId}/star-up:
+    post:
+      tags:
+      - heroes
+      summary: Promover estrela (consome fragmentos + pó de promoção)
+      parameters:
+      - name: playerHeroId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                use_universal_shards:
+                  type: integer
+                  minimum: 0
+                  default: 0
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeroMutationResponse'
+          description: OK
+        '402':
+          description: Fragmentos/pó insuficientes
+  /heroes/{playerHeroId}/equip:
+    post:
+      tags:
+      - heroes
+      summary: Equipar/desequipar item
+      parameters:
+      - name: playerHeroId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - player_item_id
+              properties:
+                player_item_id:
+                  type: string
+                  format: uuid
+                unequip:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: OK
+  /afk/status:
+    get:
+      tags:
+      - afk
+      summary: Prévia do acumulado (sem coletar)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accumulated_seconds:
+                    type: integer
+                  cap_seconds:
+                    type: integer
+                  pending_rewards:
+                    $ref: '#/components/schemas/RewardBundle'
+          description: OK
+  /afk/claim:
+    post:
+      tags:
+      - afk
+      summary: Coletar AFK (idempotente)
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rewards:
+                    $ref: '#/components/schemas/RewardBundle'
+                  player:
+                    $ref: '#/components/schemas/ResourceSnapshot'
+          description: OK
+  /afk/quick:
+    post:
+      tags:
+      - afk
+      summary: Coleta rápida (grátis 1x/dia, via anúncio ou diamantes)
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - method
+              properties:
+                method:
+                  type: string
+                  enum:
+                  - free
+                  - ad
+                  - gems
+                ad_token:
+                  type: string
+                  description: token SSV do AdMob quando method=ad
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rewards:
+                    $ref: '#/components/schemas/RewardBundle'
+          description: OK
+        '429':
+          description: Limite diário atingido
+  /gacha/summon:
+    post:
+      tags:
+      - gacha
+      summary: Invocar 1x ou 10x (sorteio no servidor, pity 60)
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - batch
+              - cost_type
+              properties:
+                batch:
+                  type: integer
+                  enum:
+                  - 1
+                  - 10
+                cost_type:
+                  type: string
+                  enum:
+                  - gems
+                  - scroll
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        hero_def_id:
+                          type: string
+                        rarity:
+                          type: string
+                        is_new:
+                          type: boolean
+                        converted_shards:
+                          type: integer
+                          description: '>0 se duplicata'
+                        was_pity:
+                          type: boolean
+                  pity_counter:
+                    type: integer
+                  player:
+                    $ref: '#/components/schemas/ResourceSnapshot'
+          description: OK
+        '402':
+          description: Diamantes/pergaminhos insuficientes
+  /battle/start:
+    post:
+      tags:
+      - battle
+      summary: Inicia batalha; servidor congela snapshot dos times e gera seed
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - mode
+              - ref_id
+              properties:
+                mode:
+                  type: string
+                  enum:
+                  - campaign
+                  - tower
+                  - dungeon
+                ref_id:
+                  type: string
+                  description: stage_id | floor:<n> | dungeon:<tipo>
+      responses:
+        '200':
+          description: Servidor já simulou; retorna seed + resultado + recompensas. Cliente reproduz o replay.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  battle_id:
+                    type: string
+                    format: uuid
+                  seed:
+                    type: integer
+                    format: int64
+                  result:
+                    type: string
+                    enum:
+                    - win
+                    - loss
+                  rounds:
+                    type: integer
+                  attacker_snapshot:
+                    type: array
+                    items:
+                      type: object
+                  defender_snapshot:
+                    type: array
+                    items:
+                      type: object
+                  rewards:
+                    $ref: '#/components/schemas/RewardBundle'
+                  player:
+                    $ref: '#/components/schemas/ResourceSnapshot'
+        '409':
+          description: Estágio bloqueado / entradas esgotadas
+  /arena/opponents:
+    get:
+      tags:
+      - arena
+      summary: 3 oponentes na faixa de rating (±10%)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    account_id:
+                      type: string
+                      format: uuid
+                    nickname:
+                      type: string
+                    rating:
+                      type: integer
+                    power:
+                      type: integer
+          description: OK
+  /arena/attack:
+    post:
+      tags:
+      - arena
+      summary: Atacar formação de defesa (assíncrono); consome 1 tentativa
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - defender_id
+              properties:
+                defender_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  battle_id:
+                    type: string
+                    format: uuid
+                  seed:
+                    type: integer
+                    format: int64
+                  result:
+                    type: string
+                    enum:
+                    - win
+                    - loss
+                  rating_delta:
+                    type: integer
+                  new_rating:
+                    type: integer
+                  rewards:
+                    $ref: '#/components/schemas/RewardBundle'
+          description: OK
+        '429':
+          description: Sem tentativas hoje
+  /arena/ranking:
+    get:
+      tags:
+      - arena
+      summary: Top 100 + posição do jogador (Redis)
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  season:
+                    type: integer
+                  ends_at:
+                    type: string
+                    format: date-time
+                  my_rank:
+                    type: integer
+                  top:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rank:
+                          type: integer
+                        nickname:
+                          type: string
+                        rating:
+                          type: integer
+          description: OK
+  /quests:
+    get:
+      tags:
+      - quests
+      summary: Diárias, semanais e conquistas com progresso
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    quest_id:
+                      type: string
+                    kind:
+                      type: string
+                      enum:
+                      - daily
+                      - weekly
+                      - achievement
+                    progress:
+                      type: integer
+                    target:
+                      type: integer
+                    claimed:
+                      type: boolean
+                    rewards:
+                      $ref: '#/components/schemas/RewardBundle'
+          description: OK
+  /quests/{questId}/claim:
+    post:
+      tags:
+      - quests
+      summary: Resgatar recompensa de missão completa
+      parameters:
+      - name: questId
+        in: path
+        required: true
+        schema:
+          type: string
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rewards:
+                    $ref: '#/components/schemas/RewardBundle'
+          description: OK
+        '409':
+          description: Incompleta ou já resgatada
+  /shop/verify:
+    post:
+      tags:
+      - shop
+      summary: Verificar recibo IAP e creditar (Google Play Developer API / App Store Server API)
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - platform
+              - product_id
+              - receipt
+              properties:
+                platform:
+                  type: string
+                  enum:
+                  - google
+                  - apple
+                product_id:
+                  type: string
+                receipt:
+                  type: string
+                  description: purchaseToken (Google) ou signedTransaction (Apple)
+      responses:
+        '200':
+          description: Verificado e creditado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  granted:
+                    $ref: '#/components/schemas/RewardBundle'
+                  player:
+                    $ref: '#/components/schemas/ResourceSnapshot'
+        '402':
+          description: Recibo inválido
+        '409':
+          description: Recibo já utilizado
+  /shop/ad-reward:
+    post:
+      tags:
+      - shop
+      summary: Creditar recompensa de anúncio (valida token SSV do AdMob; cap 5/dia)
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - placement
+              - ad_token
+              properties:
+                placement:
+                  type: string
+                  enum:
+                  - afk_boost
+                  - dungeon_entry
+                  - daily_scroll
+                ad_token:
+                  type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rewards:
+                    $ref: '#/components/schemas/RewardBundle'
+          description: OK
+        '429':
+          description: Cap diário de anúncios
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID gerado pelo cliente; repetição retorna a resposta original.
+  schemas:
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+          example: 900
+        is_new_account:
+          type: boolean
+    ResourceSnapshot:
+      type: object
+      description: Recursos atuais após a operação (cliente sincroniza a UI)
+      properties:
+        gold:
+          type: integer
+          format: int64
+        gems:
+          type: integer
+          format: int64
+          description: free + paid
+        xp_dust:
+          type: integer
+          format: int64
+        promo_dust:
+          type: integer
+          format: int64
+        summon_scrolls:
+          type: integer
+    RewardBundle:
+      type: array
+      items:
+        type: object
+        required:
+        - type
+        - amount
+        properties:
+          type:
+            type: string
+            enum:
+            - gold
+            - gems
+            - xp_dust
+            - promo_dust
+            - scroll
+            - hero_shard
+            - universal_shard
+            - item
+            - hero
+          key:
+            type: string
+            description: hero_def_id / item_def_id / rarity quando aplicável
+          amount:
+            type: integer
+            format: int64
+    HeroDef:
+      type: object
+      properties:
+        id:
+          type: string
+        name_pt:
+          type: string
+        name_en:
+          type: string
+        faction:
+          type: string
+          enum:
+          - flame
+          - forest
+          - storm
+          - rock
+          - abyss
+        rarity:
+          type: string
+          enum:
+          - common
+          - rare
+          - epic
+          - legendary
+        role:
+          type: string
+          enum:
+          - tank
+          - phys_dps
+          - mag_dps
+          - support
+          - control
+        base_stats:
+          type: object
+        growth_stats:
+          type: object
+        passive:
+          type: object
+        ultimate:
+          type: object
+        sprite_key:
+          type: string
+    HeroMutationResponse:
+      type: object
+      properties:
+        hero:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            hero_def_id:
+              type: string
+            level:
+              type: integer
+            stars:
+              type: integer
+            computed_stats:
+              type: object
+              description: stats finais calculados no servidor
+        player:
+          $ref: '#/components/schemas/ResourceSnapshot'
+    PlayerState:
+      type: object
+      properties:
+        profile:
+          type: object
+          properties:
+            nickname:
+              type: string
+            level:
+              type: integer
+            xp:
+              type: integer
+              format: int64
+            max_stage_id:
+              type: string
+            arena_rating:
+              type: integer
+            monthly_pass_until:
+              type: string
+              format: date-time
+              nullable: true
+            pity_counter:
+              type: integer
+        resources:
+          $ref: '#/components/schemas/ResourceSnapshot'
+        heroes:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              hero_def_id:
+                type: string
+              level:
+                type: integer
+              stars:
+                type: integer
+              equipped_items:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+        items:
+          type: array
+          items:
+            type: object
+        formations:
+          type: object
+        shards:
+          type: array
+          items:
+            type: object
+            properties:
+              shard_key:
+                type: string
+              amount:
+                type: integer
+        afk:
+          type: object
+          properties:
+            last_claim_at:
+              type: string
+              format: date-time
+            cap_hours:
+              type: integer
